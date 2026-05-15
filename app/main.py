@@ -15,6 +15,7 @@ from app.crud import create_subscription, deactivate_subscription, get_subscript
 from app.database import get_session, init_db
 from app.schemas import SubscriptionCreate
 from app.cve_client import fetch_cves_for_app, search_cpe
+from app.email_service import send_subscription_confirmation
 from app.worker import start_scheduler
 
 limiter = Limiter(key_func=get_remote_address)
@@ -91,6 +92,14 @@ async def subscribe(
     payload = SubscriptionCreate(email=email, app_name=app_name, severities=severities)
     subscription = await create_subscription(session, payload)
 
+    try:
+        await send_subscription_confirmation(
+            subscription.email, subscription.app_name,
+            subscription.severities, subscription.unsubscribe_token,
+        )
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         "subscribe_success.html",
         {
@@ -150,6 +159,15 @@ async def api_subscribe(
     session: AsyncSession = Depends(get_session),
 ):
     subscription = await create_subscription(session, payload)
+
+    try:
+        await send_subscription_confirmation(
+            subscription.email, subscription.app_name,
+            subscription.severities, subscription.unsubscribe_token,
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "email": subscription.email,

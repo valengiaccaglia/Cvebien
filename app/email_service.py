@@ -35,3 +35,45 @@ async def send_cve_alert(to_email: str, subscription: dict, cve: dict) -> None:
         "subject": subject,
         "html": html,
     })
+
+
+async def send_subscription_confirmation(to_email: str, app_name: str, severities: list[str], unsubscribe_token: str) -> None:
+    unsubscribe_url = build_unsubscribe_url(unsubscribe_token)
+    sev_list = ", ".join(s.title() for s in severities)
+    html = f"""
+    <div style='font-family:Arial,sans-serif;color:#111;line-height:1.6;max-width:520px;margin:0 auto'>
+      <div style='background:#0B1730;padding:32px;border-radius:12px;text-align:center'>
+        <div style='width:14px;height:14px;border-radius:7px;background:#fff;display:inline-block;margin-bottom:16px'></div>
+        <h1 style='color:#EAEFFC;font-size:22px;font-weight:400;margin:0 0 8px'>Alerta registrada</h1>
+        <p style='color:rgba(234,239,252,0.55);font-size:14px;margin:0'>Ya estás suscripto a <strong style='color:#EAEFFC'>{app_name}</strong></p>
+      </div>
+      <div style='padding:28px 0'>
+        <table style='width:100%;border-collapse:collapse;font-size:14px'>
+          <tr style='border-bottom:1px solid #eee'>
+            <td style='padding:10px 0;color:#888'>Aplicación</td>
+            <td style='padding:10px 0;font-weight:600'>{app_name}</td>
+          </tr>
+          <tr style='border-bottom:1px solid #eee'>
+            <td style='padding:10px 0;color:#888'>Email</td>
+            <td style='padding:10px 0'>{to_email}</td>
+          </tr>
+          <tr>
+            <td style='padding:10px 0;color:#888'>Severidades</td>
+            <td style='padding:10px 0'>{sev_list}</td>
+          </tr>
+        </table>
+        <p style='font-size:13px;color:#888;margin-top:24px'>
+          Te vamos a avisar cada vez que se publique una nueva CVE que afecte a <strong>{app_name}</strong> con severidad {sev_list}.
+        </p>
+        <p style='margin-top:24px'>
+          <a href='{unsubscribe_url}' style='font-size:13px;color:#888;text-decoration:underline'>Cancelar suscripción</a>
+        </p>
+      </div>
+    </div>
+    """
+    await resend.Emails.send_async({
+        "from": "alerts@cvenamenazas.app",
+        "to": [to_email],
+        "subject": f"Suscripción confirmada — {app_name}",
+        "html": html,
+    })
