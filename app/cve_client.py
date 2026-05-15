@@ -9,7 +9,6 @@ from app.config import settings
 
 NVD_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 NVD_CPE_URL = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
-OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 
 
 def _nvd_headers() -> dict:
@@ -263,27 +262,33 @@ async def fetch_nvd_cve_detail(cve_id: str) -> Dict[str, Optional[str]]:
 
 
 async def fetch_osv_fix(cve_id: str) -> Dict[str, Optional[str]]:
+    empty: Dict[str, Optional[str]] = {
+        "fixed_version": None,
+        "patched": False,
+        "affected_packages": [],
+        "affected_ecosystems": [],
+        "affected_keywords": [],
+    }
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(OSV_QUERY_URL, json={"id": cve_id})
+        response = await client.get(f"https://api.osv.dev/v1/vulns/{cve_id}")
+        if response.status_code in (400, 404):
+            return empty
         response.raise_for_status()
-        payload = response.json()
+        vuln = response.json()
+
+    affected_meta = _extract_osv_package_names({"vulns": [vuln]})
 
     fixed_version = None
-    for vuln in payload.get("vulns", []):
-        for affected_item in vuln.get("affected", []):
-            for range_item in affected_item.get("ranges", []):
-                for event in range_item.get("events", []):
-                    if event.get("fixed"):
-                        fixed_version = event.get("fixed")
-                        break
-                if fixed_version:
+    for affected_item in vuln.get("affected", []):
+        for range_item in affected_item.get("ranges", []):
+            for event in range_item.get("events", []):
+                if event.get("fixed"):
+                    fixed_version = event.get("fixed")
                     break
             if fixed_version:
                 break
         if fixed_version:
             break
-
-    affected_meta = _extract_osv_package_names(payload)
 
     return {
         "fixed_version": fixed_version,
