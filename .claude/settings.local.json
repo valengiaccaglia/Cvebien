@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv\\\\Scripts\\\\python.exe --version)",
+      "Bash(venv\\\\Scripts\\\\pip.exe install *)",
+      "PowerShell(cd \"c:\\\\Users\\\\valen\\\\Desktop\\\\Cven amenazas\"; $proc = Start-Process -FilePath \".\\\\venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\", \"uvicorn\", \"app.main:app\", \"--host\", \"127.0.0.1\", \"--port\", \"8000\" -PassThru -RedirectStandardOutput \".\\\\startup.log\" -RedirectStandardError \".\\\\startup_err.log\"; Start-Sleep -Seconds 5; $proc.HasExited)",
+      "PowerShell($pids = \\(netstat -ano | Select-String \":8000\\\\s\"\\).ForEach\\({ \\($_ -split '\\\\s+'\\)[-1] }\\) | Sort-Object -Unique; $pids | ForEach-Object { if \\($_ -match '^\\\\d+$'\\) { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue; \"Killed PID $_\" } })",
+      "PowerShell(cd \"c:\\\\Users\\\\valen\\\\Desktop\\\\Cven amenazas\"; Remove-Item -Force \".\\\\startup.log\",\".\\\\startup_err.log\" -ErrorAction SilentlyContinue; $proc = Start-Process -FilePath \".\\\\venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\", \"uvicorn\", \"app.main:app\", \"--host\", \"127.0.0.1\", \"--port\", \"8000\" -PassThru -RedirectStandardOutput \".\\\\startup.log\" -RedirectStandardError \".\\\\startup_err.log\"; Start-Sleep -Seconds 6; $proc.HasExited)",
+      "PowerShell(Resolve-DnsName db.clxviuzjwpvlomcxgqou.supabase.co -ErrorAction SilentlyContinue)",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\valen\\\\Desktop\\\\Cven amenazas\\\\backfill.py\")"
+    ]
+  }
+}

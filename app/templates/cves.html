@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browse CVEs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fb; }
+        nav { background: #1e3a5f; padding: 14px 24px; display: flex; align-items: center; gap: 24px; }
+        nav a { color: white; text-decoration: none; font-weight: 600; font-size: 15px; }
+        nav a.secondary { color: #93c5fd; font-weight: 400; }
+        .container { max-width: 960px; margin: 40px auto; background: white; border-radius: 18px; padding: 32px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); }
+        .headline { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+        h1 { color: #111827; }
+        .search-form { display: flex; gap: 12px; flex-wrap: wrap; }
+        .search-form input { flex: 1; padding: 14px 16px; border: 1px solid #d1d5db; border-radius: 12px; font-size: 15px; }
+        .search-form button { padding: 14px 18px; border: none; border-radius: 12px; background: #2563eb; color: white; cursor: pointer; font-size: 15px; }
+        .card { background: #f8fafc; padding: 22px; border-radius: 16px; margin-bottom: 18px; border: 1px solid #e2e8f0; }
+        .card h2 { margin: 0 0 12px; font-size: 20px; color: #111827; }
+        .meta { display: flex; gap: 14px; flex-wrap: wrap; color: #4b5563; margin-bottom: 12px; font-size: 14px; }
+        .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+        .badge-critical { background: #fee2e2; color: #991b1b; }
+        .badge-high { background: #ffedd5; color: #9a3412; }
+        .badge-medium { background: #fef9c3; color: #854d0e; }
+        .badge-low { background: #dcfce7; color: #166534; }
+        .badge-unknown { background: #f1f5f9; color: #475569; }
+        p.desc { color: #374151; line-height: 1.7; font-size: 15px; }
+        .empty { color: #4b5563; text-align: center; padding: 48px 0; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/">CVE Notifications</a>
+        <a href="/cves" class="secondary">Browse CVEs</a>
+    </nav>
+    <div class="container">
+        <div class="headline">
+            <div>
+                <h1>Browse CVEs</h1>
+                <p style="color:#4b5563;margin-top:4px;">Search recent cached CVEs by ID or description.</p>
+            </div>
+            <form class="search-form" method="get" action="/cves">
+                <input type="text" name="query" placeholder="Search CVE ID or product" value="{{ query }}">
+                <button type="submit">Search</button>
+            </form>
+        </div>
+
+        {% if cves %}
+            {% for cve in cves %}
+                <div class="card">
+                    <h2>{{ cve.cve_id }}</h2>
+                    <div class="meta">
+                        <span class="badge badge-{{ cve.severity }}">{{ cve.severity }}</span>
+                        <span><strong>CVSS:</strong> {{ cve.cvss_score or 'N/A' }}</span>
+                        <span><strong>Fixed:</strong> {{ cve.fixed_version or 'Unpatched' }}</span>
+                    </div>
+                    <p class="desc">{{ cve.description }}</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty">
+                <p>No CVEs found yet. The worker populates recent CVEs after the first hourly check.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

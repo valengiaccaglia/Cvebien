@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CVE Notifications — Vulnerabilidades que te podes encontrar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:#0B1730}
+    body{font-family:'Geist',system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#EAEFFC}
+    ::selection{background:rgba(255,255,255,0.18)}
+    ::-webkit-scrollbar{width:8px;height:8px}
+    ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:8px}
+    ::-webkit-scrollbar-track{background:transparent}
+    button{font-family:inherit;cursor:pointer}
+    input{font-family:inherit}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes liftIn{from{opacity:0;transform:translateY(12px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+    @keyframes phIn{from{opacity:0;transform:translate(0,calc(-50% + 4px))}to{opacity:1;transform:translate(0,-50%)}}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ── Design tokens ────────────────────────────────────────────────
+const C = {
+  bg:'#0B1730', bgDeep:'#070F22', ink:'#EAEFFC',
+  inkSoft:'rgba(234,239,252,0.55)', inkFaint:'rgba(234,239,252,0.32)',
+  line:'rgba(234,239,252,0.10)', lineSoft:'rgba(234,239,252,0.06)',
+  card:'rgba(234,239,252,0.02)', cardHover:'rgba(234,239,252,0.045)', white:'#FFFFFF'
+};
+const SEV = {critical:'#FF6B5B', high:'#FFB070', medium:'#F4D06F', low:'#8FB8FF'};
+const FS = "'Geist',system-ui,sans-serif";
+const FM = "'Geist Mono',ui-monospace,monospace";
+
+// ── App catalog ──────────────────────────────────────────────────
+const APPS = [
+  {id:'nginx',        name:'nginx',              vendor:'F5, Inc.',              category:'Web Server',      version:'1.27.4'},
+  {id:'apache-httpd', name:'Apache HTTP Server', vendor:'Apache Foundation',     category:'Web Server',      version:'2.4.62'},
+  {id:'postgresql',   name:'PostgreSQL',         vendor:'PGDG',                  category:'Database',        version:'17.2'},
+  {id:'openssl',      name:'OpenSSL',            vendor:'OpenSSL Project',       category:'Cryptography',    version:'3.4.0'},
+  {id:'linux-kernel', name:'Linux Kernel',       vendor:'kernel.org',            category:'Operating System',version:'6.13'},
+  {id:'redis',        name:'Redis',              vendor:'Redis Ltd.',             category:'Database',        version:'8.0'},
+  {id:'nodejs',       name:'Node.js',            vendor:'OpenJS Foundation',     category:'Runtime',         version:'22.11.0'},
+  {id:'python',       name:'CPython',            vendor:'PSF',                   category:'Runtime',         version:'3.13.1'},
+  {id:'docker',       name:'Docker Engine',      vendor:'Docker Inc.',            category:'Container',       version:'27.4'},
+  {id:'kubernetes',   name:'Kubernetes',         vendor:'CNCF',                  category:'Container',       version:'1.32'},
+  {id:'mongodb',      name:'MongoDB',            vendor:'MongoDB Inc.',           category:'Database',        version:'8.0'},
+  {id:'haproxy',      name:'HAProxy',            vendor:'HAProxy Technologies',  category:'Proxy',           version:'3.1'},
+  {id:'notepad-plus-plus', name:'Notepad++',    vendor:'Notepad++ Project',     category:'Text Editor',     version:'8.7.5'},
+  {id:'discord',      name:'Discord',            vendor:'Discord Inc.',           category:'Communication',   version:'1.0.9174'},
+  {id:'whatsapp',     name:'WhatsApp',           vendor:'Meta Platforms',         category:'Communication',   version:'2.2450.0'},
+  {id:'telegram',     name:'Telegram',           vendor:'Telegram FZ-LLC',       category:'Communication',   version:'5.9.1'},
+];
+
+const SOURCES = [
+  {name:'NVD',    org:'NIST National Vulnerability Database', coverage:'global · CVE/CPE',         cadence:'15 min'},
+  {name:'OSV',    org:'Open Source Vulnerabilities — Google', coverage:'ecosistemas open source',   cadence:'streaming'},
+];
+
+// ── State ────────────────────────────────────────────────────────
+let S = {
+  tab: 'catalogo',
+  query: '',
+  openApp: null,
+  alertApp: null,
+  alertEmail: '',
+  alertSevs: {critical:true, high:true, medium:false, low:false},
+  alertDone: false,
+  alertError: '',
+  subs: (() => { try { return JSON.parse(localStorage.getItem('cvebien_subs')||'{}'); } catch{return {};} })(),
+  cves: {},        // { appId: CVE[] | null(loading) }
+  phIdx: 0,
+  cpeResults: [],  // live NVD CPE search results
+  cpeLoading: false,
+};
+
+// ── CPE search (debounced + cached) ─────────────────────────────
+let _cpeTimer = null;
+const _cpeCache = {};  // { query: results[] }
+function triggerCpeSearch(q) {
+  clearTimeout(_cpeTimer);
+  S.cpeResults = [];
+  S.cpeLoading = false;
+  if (!q || q.length < 2) { renderSearchDropdown(); return; }
+  const hasExactMatch = APPS.some(a => a.name.toLowerCase() === q.toLowerCase());
+  if (hasExactMatch) { renderSearchDropdown(); return; }
+  // Return cached result instantly
+  if (_cpeCache[q]) { S.cpeResults = _cpeCache[q]; renderSearchDropdown(); return; }
+  S.cpeLoading = true;
+  renderSearchDropdown();
+  _cpeTimer = setTimeout(async () => {
+    try {
+      const r = await fetch('/api/search-apps?q='+encodeURIComponent(q));
+      S.cpeResults = await r.json();
+      _cpeCache[q] = S.cpeResults;
+    } catch { S.cpeResults = []; }
+    S.cpeLoading = false;
+    renderSearchDropdown();
+  }, 800);
+}
+
+function renderSearchDropdown() {
+  const el = document.getElementById('cpe-dropdown');
+  if (el) el.outerHTML = buildCpeDropdown();
+}
+
+function buildCpeDropdown() {
+  if (!S.query || S.query.length < 2) return '<div id="cpe-dropdown"></div>';
+  const filtered = APPS.filter(a => a.name.toLowerCase().includes(S.query.toLowerCase()));
+  if (filtered.length > 0 && !S.cpeLoading && S.cpeResults.length === 0) return '<div id="cpe-dropdown"></div>';
+  if (!S.cpeLoading && S.cpeResults.length === 0) return '<div id="cpe-dropdown"></div>';
+
+  const items = S.cpeLoading
+    ? `<div style="padding:14px 20px;font-size:13px;color:${C.inkFaint}">Buscando en NVD…</div>`
+    : S.cpeResults.map(r => `
+        <div onclick="subscribeFromCpe(${JSON.stringify(r).replace(/"/g,'&quot;')})"
+             style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:background 120ms ease"
+             onmouseenter="this.style.background='${C.cardHover}'" onmouseleave="this.style.background='transparent'">
+          <div>
+            <div style="font-size:14px;color:${C.ink};letter-spacing:-0.005em">${r.title}</div>
+            <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};margin-top:2px">${r.vendor} · ${r.app_name}</div>
+          </div>
+          <div style="font-family:${FM};font-size:11px;color:${C.inkSoft};padding:4px 10px;border:1px solid ${C.line};border-radius:6px;white-space:nowrap">Subscribirse</div>
+        </div>`).join('');
+
+  return `<div id="cpe-dropdown" style="position:absolute;top:calc(100% + 8px);left:0;right:0;background:#111D35;border:1px solid ${C.line};border-radius:12px;overflow:hidden;z-index:100;box-shadow:0 20px 60px -10px rgba(0,0,0,0.6)">${items}</div>`;
+}
+
+function subscribeFromCpe(result) {
+  S.alertApp = { id: result.app_name, name: result.title, vendor: result.vendor };
+  S.alertDone = false; S.alertError = '';
+  render();
+}
+
+const PH = ['Buscar CVE-2025-12891','openssl','linux kernel use-after-free','PostgreSQL','vendor, paquete o palabra clave'];
+setInterval(() => { S.phIdx = (S.phIdx+1) % PH.length; if (!document.querySelector('#search-input:focus') && !S.query) renderPlaceholder(); }, 2800);
+
+// ── Helpers ──────────────────────────────────────────────────────
+function saveSubs() { try { localStorage.setItem('cvebien_subs', JSON.stringify(S.subs)); } catch{} }
+function dot(sev, size=6) { return `<span style="display:inline-block;width:${size}px;height:${size}px;border-radius:${size}px;background:${SEV[sev.toLowerCase()]||'#888'}"></span>`; }
+function sevColor(sev) { return SEV[(sev||'').toLowerCase()] || C.inkSoft; }
+function capitalize(s) { return s ? s.charAt(0).toUpperCase()+s.slice(1) : ''; }
+function countBySev(cves, sev) { return (cves||[]).filter(c=>c.severity===sev).length; }
+
+// ── API ──────────────────────────────────────────────────────────
+async function loadCVEs(app) {
+  if (app.id in S.cves) return;
+  S.cves[app.id] = null; // loading
+  try {
+    const r = await fetch('/api/cves?app='+encodeURIComponent(app.name));
+    S.cves[app.id] = await r.json();
+  } catch { S.cves[app.id] = []; }
+  // update card stats + detail panel if open
+  const card = document.getElementById('card-'+app.id);
+  if (card) card.innerHTML = buildCardInner(app);
+  if (S.openApp && S.openApp.id === app.id) renderPanel();
+}
+
+async function submitSubscribe() {
+  const email = document.getElementById('alert-email').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+  const sevs = Object.entries(S.alertSevs).filter(([,v])=>v).map(([k])=>k);
+  try {
+    const r = await fetch('/api/subscribe', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email, app_name: S.alertApp.name, severities: sevs.length ? sevs : ['critical']}),
+    });
+    if (!r.ok) throw new Error();
+    S.subs[S.alertApp.id] = email;
+    saveSubs();
+    S.alertDone = true;
+    renderModal();
+    setTimeout(() => { S.alertApp=null; S.alertDone=false; render(); }, 1200);
+  } catch { S.alertError = 'Error al registrar. Intentá de nuevo.'; renderModal(); }
+}
+
+// ── Render functions ─────────────────────────────────────────────
+function render() {
+  const root = document.getElementById('app');
+  root.innerHTML = `
+    <div style="min-height:100vh;display:flex;flex-direction:column">
+      ${buildHeader()}
+      <main style="flex:1">${S.tab==='catalogo' ? buildCatalogo() : buildFuentes()}</main>
+      ${buildFooter()}
+    </div>
+    ${S.openApp ? buildPanel() : ''}
+    ${S.alertApp ? buildModal() : ''}
+  `;
+  attachListeners();
+  APPS.forEach(a => loadCVEs(a));
+}
+
+function buildHeader() {
+  return `
+    <header style="padding:22px 56px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid ${C.lineSoft}">
+      <button onclick="setTab('catalogo')" style="background:transparent;border:none;color:${C.ink};display:flex;align-items:center;gap:10px;padding:0">
+        <div style="width:18px;height:18px;border-radius:9px;background:${C.white}"></div>
+        <span style="font-size:15px;font-weight:500;letter-spacing:-0.005em">cve bien</span>
+      </button>
+      <nav style="display:flex;gap:4px">
+        ${tabBtn('Catálogo','catalogo')}
+        ${tabBtn('Fuentes','fuentes')}
+      </nav>
+    </header>`;
+}
+
+function tabBtn(label, id) {
+  const active = S.tab===id;
+  return `<button onclick="setTab('${id}')" style="background:transparent;border:none;border-bottom:1px solid ${active?C.ink:'transparent'};color:${active?C.ink:C.inkSoft};padding:6px 14px 4px;font-size:13px;transition:color 160ms ease;letter-spacing:-0.005em">${label}</button>`;
+}
+
+function buildCatalogo() {
+  const filtered = APPS.filter(a => {
+    const q = S.query.toLowerCase();
+    return !q || a.name.toLowerCase().includes(q) || a.vendor.toLowerCase().includes(q) || a.category.toLowerCase().includes(q);
+  });
+  const totalCVEs = Object.values(S.cves).filter(Array.isArray).reduce((s,a)=>s+a.length,0);
+
+  return `
+    <section style="max-width:760px;margin:0 auto;padding:90px 56px 60px;text-align:center">
+      <h1 style="font-size:clamp(40px,6vw,64px);font-weight:300;letter-spacing:-0.025em;color:${C.ink};line-height:1.05;animation:fadeUp 560ms 60ms backwards cubic-bezier(0.2,0.8,0.2,1)">
+        Amenazas constantes
+      </h1>
+      <p style="font-size:15px;color:${C.inkSoft};margin-top:16px;animation:fadeUp 560ms 180ms backwards cubic-bezier(0.2,0.8,0.2,1)">
+        Mantente alerta
+      </p>
+      <div style="margin-top:44px;animation:fadeUp 560ms 300ms backwards cubic-bezier(0.2,0.8,0.2,1)">
+        ${buildSearch()}
+      </div>
+    </section>
+
+    <section style="max-width:1240px;margin:0 auto;padding:20px 56px 100px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px;font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.08em;text-transform:uppercase">
+        <span>${filtered.length === APPS.length ? filtered.length+' aplicaciones' : filtered.length+' resultados'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px">
+        ${filtered.map((a,i) => buildCard(a,i)).join('')}
+      </div>
+    </section>`;
+}
+
+function buildSearch() {
+  return `
+    <div style="position:relative">
+      <div style="width:100%;background:${C.white};border-radius:14px;padding:20px 24px;display:flex;align-items:center;gap:16px;box-shadow:0 20px 60px -30px rgba(0,0,0,0.5)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;opacity:0.55">
+          <circle cx="11" cy="11" r="7" stroke="#0B1730" stroke-width="1.5"/>
+          <path d="M20 20l-3.5-3.5" stroke="#0B1730" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <div style="flex:1;position:relative;min-height:28px;display:flex;align-items:center">
+          <input id="search-input" value="${S.query}" oninput="onSearch(this.value)" style="width:100%;border:none;outline:none;font-size:17px;font-weight:400;color:#0B1730;background:transparent;letter-spacing:-0.005em" />
+          ${!S.query ? `<div id="search-ph" style="position:absolute;left:0;top:50%;transform:translateY(-50%);color:#8C96B0;font-size:17px;pointer-events:none;animation:phIn 420ms cubic-bezier(0.2,0.8,0.2,1);letter-spacing:-0.005em">${PH[S.phIdx]}</div>` : ''}
+        </div>
+        <span style="font-family:${FM};font-size:11px;color:#8C96B0;letter-spacing:0.04em">⌘K</span>
+      </div>
+      ${buildCpeDropdown()}
+    </div>`;
+}
+
+function renderPlaceholder() {
+  const el = document.getElementById('search-ph');
+  if (el) { el.style.animation='none'; el.textContent=PH[S.phIdx]; el.offsetHeight; el.style.animation='phIn 420ms cubic-bezier(0.2,0.8,0.2,1)'; }
+}
+
+function buildCard(app, idx) {
+  return `<div id="card-${app.id}" onclick="openApp('${app.id}')" onmouseenter="this.style.background='${C.cardHover}';this.style.borderColor='${C.line}'" onmouseleave="this.style.background='${C.card}';this.style.borderColor='${C.lineSoft}'" style="background:${C.card};border:1px solid ${C.lineSoft};border-radius:10px;padding:22px 22px 20px;cursor:pointer;display:flex;flex-direction:column;gap:22px;transition:background 200ms ease,border-color 200ms ease;animation:fadeUp 500ms ${idx*35}ms backwards cubic-bezier(0.2,0.8,0.2,1)">${buildCardInner(app)}</div>`;
+}
+
+function buildCardInner(app) {
+  const cves = S.cves[app.id];
+  const loading = cves === null;
+  const total = Array.isArray(cves) ? cves.length : 0;
+  const critical = countBySev(cves,'critical');
+  const high = countBySev(cves,'high');
+  const medium = countBySev(cves,'medium');
+  const low = countBySev(cves,'low');
+  const subscribed = !!S.subs[app.id];
+
+  const barSeg = (sev, count) => total ? `<div style="width:${(count/total*100)}%;background:${SEV[sev]}"></div>` : '';
+  const bar = `<div style="display:flex;height:2px;background:${C.lineSoft};border-radius:1px;overflow:hidden">${barSeg('critical',critical)}${barSeg('high',high)}${barSeg('medium',medium)}${barSeg('low',low)}</div>`;
+
+  const bellBtn = `<button onclick="event.stopPropagation();openAlert('${app.id}')" title="${subscribed?'Alerta activa':'Recibir alertas'}" style="background:${subscribed?'rgba(123,211,137,0.12)':'transparent'};border:1px solid ${subscribed?'rgba(123,211,137,0.4)':C.line};border-radius:999px;width:28px;height:28px;display:grid;place-items:center;color:${subscribed?'#7BD389':C.inkSoft};transition:all 160ms ease;position:relative">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2.2c-1.9 0-3.4 1.5-3.4 3.4v1.6c0 1.1-.4 2.2-1.2 3l-.4.4h10l-.4-.4c-.8-.8-1.2-1.9-1.2-3V5.6c0-1.9-1.5-3.4-3.4-3.4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="${subscribed?'currentColor':'none'}"/><path d="M6.5 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    ${subscribed?`<span style="position:absolute;top:-2px;right:-2px;width:7px;height:7px;border-radius:4px;background:#7BD389;border:2px solid ${C.bg}"></span>`:''}
+  </button>`;
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:17px;font-weight:500;color:${C.ink};letter-spacing:-0.01em">${app.name}</div>
+        <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};margin-top:4px;letter-spacing:0.02em">${app.vendor}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.04em">v${app.version}</div>
+        ${bellBtn}
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font-size:34px;font-weight:300;color:${C.ink};line-height:1;letter-spacing:-0.02em">
+          ${loading ? '<span style="opacity:0.3">…</span>' : total}
+          <span style="font-family:${FM};font-size:11px;color:${C.inkFaint};margin-left:8px;letter-spacing:0.06em;text-transform:uppercase;font-weight:400">cves</span>
+        </div>
+        <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.02em">${app.category}</div>
+      </div>
+      ${total > 0 ? bar : `<div style="height:2px;background:${C.lineSoft};border-radius:1px"></div>`}
+      <div style="display:flex;gap:14px;font-family:${FM};font-size:11px;color:${C.inkSoft};letter-spacing:0.02em">
+        <span style="display:inline-flex;align-items:center;gap:6px">${dot('critical')} ${critical}</span>
+        <span style="display:inline-flex;align-items:center;gap:6px">${dot('high')} ${high}</span>
+        <span style="display:inline-flex;align-items:center;gap:6px">${dot('medium')} ${medium}</span>
+        <span style="display:inline-flex;align-items:center;gap:6px">${dot('low')} ${low}</span>
+      </div>
+    </div>`;
+}
+
+// ── Detail panel ─────────────────────────────────────────────────
+function buildPanel() {
+  return `
+    <div onclick="S.openApp=null;render()" style="position:fixed;inset:0;z-index:50;background:rgba(7,15,34,0.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;justify-content:flex-end;animation:fadeIn 200ms ease">
+      <div onclick="event.stopPropagation()" style="width:min(820px,96vw);height:100%;background:${C.bg};border-left:1px solid ${C.line};overflow:auto;animation:slideIn 360ms cubic-bezier(0.2,0.8,0.2,1)">
+        ${buildPanelContent()}
+      </div>
+    </div>`;
+}
+
+function buildPanelContent() {
+  const app = S.openApp;
+  const cves = S.cves[app.id] || [];
+  const loading = S.cves[app.id] === null;
+  const subscribed = !!S.subs[app.id];
+  const total = cves.length;
+  const critical = countBySev(cves,'critical');
+  const high = countBySev(cves,'high');
+  const medium = countBySev(cves,'medium');
+  const low = countBySev(cves,'low');
+
+  const rows = cves.map(c => `
+    <div style="border-bottom:1px solid ${C.lineSoft};padding:20px 0">
+      <div style="display:grid;grid-template-columns:auto 60px 1fr auto auto;gap:20px;align-items:center">
+        ${dot(c.severity)}
+        <div style="font-family:${FM};font-size:13px;color:${sevColor(c.severity)};letter-spacing:-0.01em">${c.cvss_score||'N/A'}</div>
+        <div style="min-width:0">
+          <div style="font-size:14px;color:${C.ink};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-0.005em">${c.description ? c.description.slice(0,120)+(c.description.length>120?'…':'') : c.cve_id}</div>
+          <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};margin-top:4px;letter-spacing:0.02em">${c.cve_id}</div>
+        </div>
+        <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.02em;white-space:nowrap">${capitalize(c.severity)}</div>
+        <div style="font-family:${FM};font-size:11px;color:${c.patched?SEV.low:C.inkSoft};letter-spacing:0.02em">${c.patched?'parcheado':'sin parche'}</div>
+      </div>
+    </div>`).join('');
+
+  return `
+    <div style="padding:32px 44px 24px;border-bottom:1px solid ${C.lineSoft};position:sticky;top:0;z-index:2;background:${C.bg}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px">
+        <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.1em;text-transform:uppercase">${app.category}</div>
+        <button onclick="S.openApp=null;render()" style="background:transparent;border:none;color:${C.inkSoft};font-family:${FM};font-size:12px;letter-spacing:0.04em;padding:0">cerrar &nbsp; esc</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:24px">
+        <div>
+          <div style="font-size:48px;font-weight:300;color:${C.ink};letter-spacing:-0.02em;line-height:1">${app.name}</div>
+          <div style="font-family:${FM};font-size:12px;color:${C.inkSoft};margin-top:10px;letter-spacing:0.02em">${app.vendor} · v${app.version}</div>
+        </div>
+        <button onclick="openAlert('${app.id}')" style="background:${subscribed?'rgba(123,211,137,0.10)':'transparent'};border:1px solid ${subscribed?'rgba(123,211,137,0.4)':C.line};color:${subscribed?'#7BD389':C.ink};border-radius:999px;padding:9px 16px 9px 14px;font-size:13px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;transition:all 160ms ease;letter-spacing:-0.005em">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2.2c-1.9 0-3.4 1.5-3.4 3.4v1.6c0 1.1-.4 2.2-1.2 3l-.4.4h10l-.4-.4c-.8-.8-1.2-1.9-1.2-3V5.6c0-1.9-1.5-3.4-3.4-3.4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="${subscribed?'currentColor':'none'}"/><path d="M6.5 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          ${subscribed?'Alerta activa':'Alertarme'}
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:32px;margin-top:32px">
+        ${[['Total',total,C.ink],['Critical',critical,SEV.critical],['High',high,SEV.high],['Med · Low',medium+low,C.ink]].map(([l,v,col])=>`
+          <div>
+            <div style="font-family:${FM};font-size:10px;color:${C.inkFaint};letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">${l}</div>
+            <div style="font-size:30px;font-weight:300;color:${col};line-height:1;letter-spacing:-0.02em">${v}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div style="padding:0 44px 60px">
+      ${loading ? `<div style="padding:60px;text-align:center;color:${C.inkFaint};font-size:14px">Cargando CVEs…</div>` :
+        total === 0 ? `<div style="padding:60px;text-align:center;color:${C.inkFaint};font-size:14px">Sin CVEs en caché para ${app.name} aún.</div>` :
+        rows}
+    </div>`;
+}
+
+function renderPanel() {
+  const panel = document.querySelector('[data-panel]');
+  if (panel) panel.innerHTML = buildPanelContent();
+}
+
+// ── Alert modal ──────────────────────────────────────────────────
+function buildModal() {
+  const app = S.alertApp;
+  const subscribed = S.subs[app.id];
+  if (S.alertDone) return `
+    <div onclick="S.alertApp=null;render()" style="position:fixed;inset:0;z-index:80;background:rgba(7,15,34,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;animation:fadeIn 200ms ease;padding:24px">
+      <div style="width:min(440px,100%);background:${C.bg};border:1px solid ${C.line};border-radius:14px;padding:32px;animation:liftIn 320ms cubic-bezier(0.2,0.8,0.2,1);text-align:center">
+        <div style="width:36px;height:36px;border-radius:18px;background:rgba(123,211,137,0.15);border:1px solid rgba(123,211,137,0.4);display:grid;place-items:center;margin:0 auto 18px">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7" stroke="#7BD389" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div style="font-size:17px;color:${C.ink}">Listo</div>
+        <div style="font-family:${FM};font-size:11px;color:${C.inkSoft};margin-top:8px;letter-spacing:0.02em">te avisamos a ${S.alertEmail} ante nuevos CVE de ${app.name}</div>
+      </div>
+    </div>`;
+
+  return `
+    <div onclick="closeModal(event)" style="position:fixed;inset:0;z-index:80;background:rgba(7,15,34,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;animation:fadeIn 200ms ease;padding:24px">
+      <div onclick="event.stopPropagation()" style="width:min(440px,100%);background:${C.bg};border:1px solid ${C.line};border-radius:14px;padding:32px 32px 28px;color:${C.ink};animation:liftIn 320ms cubic-bezier(0.2,0.8,0.2,1)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.1em;text-transform:uppercase">Alertas</div>
+            <div style="font-size:24px;font-weight:400;color:${C.ink};letter-spacing:-0.015em;margin-top:8px;line-height:1.2">Notificarme sobre<br>nuevos CVE de ${app.name}</div>
+          </div>
+          <button onclick="S.alertApp=null;render()" style="background:transparent;border:none;color:${C.inkSoft};padding:0;margin-top:2px">
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+
+        <div style="margin-top:28px">
+          <div style="font-family:${FM};font-size:10px;color:${C.inkFaint};letter-spacing:0.12em;text-transform:uppercase;margin-bottom:10px">Email</div>
+          <input id="alert-email" type="email" value="${S.alertEmail}" oninput="S.alertEmail=this.value;S.alertError=''" placeholder="vos@dominio.com" style="width:100%;background:transparent;border:none;border-bottom:1px solid ${C.line};outline:none;color:${C.ink};font-size:16px;padding:8px 0;letter-spacing:-0.005em;transition:border-color 160ms ease">
+          ${S.alertError ? `<div style="color:${SEV.critical};font-size:12px;margin-top:8px">${S.alertError}</div>` : ''}
+        </div>
+
+        <div style="margin-top:24px">
+          <div style="font-family:${FM};font-size:10px;color:${C.inkFaint};letter-spacing:0.12em;text-transform:uppercase;margin-bottom:12px">Severidades</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${['critical','high','medium','low'].map(s => {
+              const on = S.alertSevs[s];
+              return `<button onclick="S.alertSevs['${s}']=!S.alertSevs['${s}'];renderModal()" style="background:${on?'rgba(234,239,252,0.08)':'transparent'};border:1px solid ${on?C.line:C.lineSoft};border-radius:999px;color:${on?C.ink:C.inkSoft};padding:6px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px;transition:all 160ms ease">${dot(s)} ${capitalize(s)}</button>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:32px;align-items:center">
+          <button onclick="onSubmitAlert()" style="flex:1;background:${C.white};color:#0B1730;border:none;border-radius:10px;padding:13px 18px;font-size:14px;font-weight:500;letter-spacing:-0.005em;transition:transform 120ms ease" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform=''" onmouseleave="this.style.transform=''">
+            ${subscribed ? 'Actualizar alerta' : 'Registrarme'}
+          </button>
+          ${subscribed ? `<button onclick="delete S.subs['${app.id}'];saveSubs();S.alertApp=null;render()" style="background:transparent;border:1px solid ${C.line};color:${C.inkSoft};border-radius:10px;padding:13px 16px;font-size:13px">Quitar</button>` : ''}
+        </div>
+        <div style="font-family:${FM};font-size:10px;color:${C.inkFaint};margin-top:16px;letter-spacing:0.02em;text-align:center">email guardado también en el servidor</div>
+      </div>
+    </div>`;
+}
+
+function renderModal() {
+  const overlay = document.querySelector('[data-modal]');
+  const tmp = document.createElement('div');
+  tmp.innerHTML = buildModal();
+  if (overlay) overlay.replaceWith(tmp.firstElementChild);
+  else {
+    document.getElementById('app').insertAdjacentHTML('beforeend', buildModal());
+  }
+}
+
+// ── Fuentes tab ──────────────────────────────────────────────────
+function buildFuentes() {
+  return `
+    <section style="max-width:980px;margin:0 auto;padding:60px 56px 100px;animation:fadeUp 400ms cubic-bezier(0.2,0.8,0.2,1)">
+      <div style="font-size:36px;font-weight:300;color:${C.ink};letter-spacing:-0.02em;line-height:1.1;max-width:640px">
+        Datos agregados desde feeds públicos y reconciliados por CVE-ID.
+      </div>
+      <div style="font-size:15px;color:${C.inkSoft};margin-top:16px;max-width:560px">
+        Cada entrada conserva su origen. La sincronización es continua.
+      </div>
+      <div style="margin-top:48px">
+        ${SOURCES.map((s,i)=>`
+          <div style="display:grid;grid-template-columns:100px 1fr auto auto;gap:32px;align-items:center;padding:22px 0;border-top:1px solid ${C.lineSoft};${i===SOURCES.length-1?'border-bottom:1px solid '+C.lineSoft:''};animation:fadeUp 500ms ${i*60}ms backwards cubic-bezier(0.2,0.8,0.2,1)">
+            <div style="font-size:17px;font-weight:500;color:${C.ink};letter-spacing:-0.01em">${s.name}</div>
+            <div>
+              <div style="font-size:14px;color:${C.ink}">${s.org}</div>
+              <div style="font-family:${FM};font-size:11px;color:${C.inkFaint};margin-top:3px;letter-spacing:0.02em">${s.coverage}</div>
+            </div>
+            <div style="font-family:${FM};font-size:11px;color:${C.inkSoft};letter-spacing:0.02em">${s.cadence}</div>
+            <div style="display:inline-flex;align-items:center;gap:8px;font-family:${FM};font-size:11px;color:${C.inkSoft};letter-spacing:0.02em">
+              <span style="width:5px;height:5px;border-radius:3px;background:#7BD389;box-shadow:0 0 8px rgba(123,211,137,0.6);animation:pulse 2.4s infinite"></span>
+              activo
+            </div>
+          </div>`).join('')}
+      </div>
+    </section>`;
+}
+
+// ── Footer ───────────────────────────────────────────────────────
+function buildFooter() {
+  return `
+    <footer style="padding:24px 56px 32px;border-top:1px solid ${C.lineSoft};display:flex;justify-content:space-between;font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.04em">
+      <span>cve bien</span>
+      <span>NVD + OSV</span>
+    </footer>`;
+}
+
+// ── Event handlers ────────────────────────────────────────────────
+function setTab(t) { S.tab=t; render(); }
+function onSearch(v) {
+  S.query=v;
+  // Hide placeholder immediately without full re-render
+  const ph=document.getElementById('search-ph');
+  if(ph) { if(v) ph.style.display='none'; else ph.style.display=''; }
+  const grid=document.querySelector('[data-grid]');
+  if(grid) grid.innerHTML = APPS.filter(a=>!v||a.name.toLowerCase().includes(v.toLowerCase())||a.vendor.toLowerCase().includes(v.toLowerCase())||a.category.toLowerCase().includes(v.toLowerCase())).map((a,i)=>buildCard(a,i)).join('');
+  triggerCpeSearch(v);
+}
+function openApp(id) { S.openApp=APPS.find(a=>a.id===id); render(); }
+function openAlert(id) { S.alertApp=APPS.find(a=>a.id===id); S.alertEmail=S.subs[id]||''; S.alertDone=false; S.alertError=''; render(); }
+function closeModal(e) { if(e.target===e.currentTarget){S.alertApp=null;render();} }
+function onSubmitAlert() {
+  const email = (document.getElementById('alert-email')||{}).value||S.alertEmail;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { S.alertError='Ingresá un email válido'; renderModal(); return; }
+  S.alertEmail = email.trim();
+  submitSubscribe();
+}
+async function submitSubscribe() {
+  const sevs = Object.entries(S.alertSevs).filter(([,v])=>v).map(([k])=>k);
+  try {
+    const r = await fetch('/api/subscribe', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email:S.alertEmail, app_name:S.alertApp.name, severities:sevs.length?sevs:['critical']}),
+    });
+    if (!r.ok) throw new Error();
+    S.subs[S.alertApp.id] = S.alertEmail;
+    saveSubs();
+    S.alertDone = true;
+    render();
+    setTimeout(()=>{S.alertApp=null;S.alertDone=false;render();}, 1200);
+  } catch { S.alertError='Error al registrar. Intentá de nuevo.'; renderModal(); }
+}
+function saveSubs() { try{localStorage.setItem('cvebien_subs',JSON.stringify(S.subs));}catch{} }
+
+// ── Keyboard ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k') { e.preventDefault(); S.tab='catalogo'; render(); setTimeout(()=>document.getElementById('search-input')?.focus(),50); }
+  if (e.key==='Escape') { if(S.alertApp){S.alertApp=null;render();} else if(S.openApp){S.openApp=null;render();} }
+});
+
+function attachListeners() {}
+
+// ── Init ─────────────────────────────────────────────────────────
+render();
+APPS.forEach(a => loadCVEs(a));
+</script>
+</body>
+</html>
