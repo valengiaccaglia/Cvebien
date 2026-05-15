@@ -5,6 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -13,6 +16,8 @@ from app.database import get_session, init_db
 from app.schemas import SubscriptionCreate
 from app.cve_client import fetch_cves_for_app, search_cpe
 from app.worker import start_scheduler
+
+limiter = Limiter(key_func=get_remote_address)
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -25,6 +30,8 @@ app = FastAPI(
     version="0.1.0",
     debug=settings.DEBUG,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _scheduler: AsyncIOScheduler | None = None
 
@@ -70,6 +77,7 @@ async def browse_cves(request: Request, query: str | None = None):
 
 
 @app.post("/subscribe", response_class=HTMLResponse)
+@limiter.limit("5/hour")
 async def subscribe(
     request: Request,
     email: str = Form(...),
@@ -135,7 +143,9 @@ async def api_search_apps(q: str = ""):
 
 
 @app.post("/api/subscribe")
+@limiter.limit("5/hour")
 async def api_subscribe(
+    request: Request,
     payload: SubscriptionCreate,
     session: AsyncSession = Depends(get_session),
 ):
