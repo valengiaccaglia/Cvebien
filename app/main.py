@@ -182,7 +182,7 @@ async def health():
     return {"status": "ok", "app": "Threat Tracker"}
 
 
-@app.post("/api/admin/run-worker")
+@app.get("/api/admin/run-worker")
 async def admin_run_worker(secret: str):
     if secret != settings.ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
