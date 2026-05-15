@@ -25,5 +25,27 @@
         <p>Your subscription for <strong>{{ app_name }}</strong> has been deactivated for <strong>{{ email }}</strong>.</p>
         <p><a href="/">← Subscribe again</a></p>
     </div>
+    <script>
+        // Clear this subscription from localStorage so the UI reflects the change
+        (function() {
+            const unsubEmail = "{{ email }}";
+            const unsubName  = "{{ app_name }}";
+            try {
+                const subs = JSON.parse(localStorage.getItem('threattracker_subs') || '{}');
+                // Remove any key where the stored email matches AND the key loosely matches the app name
+                const normalizedName = unsubName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+                Object.keys(subs).forEach(function(key) {
+                    if (subs[key] !== unsubEmail) return;
+                    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+                    // Check if any word from the app name appears in the key or vice versa
+                    const nameWords = normalizedName.split(' ').filter(Boolean);
+                    const keyWords  = normalizedKey.split(' ').filter(Boolean);
+                    const overlap   = nameWords.some(w => keyWords.includes(w)) || keyWords.some(w => nameWords.includes(w));
+                    if (overlap) delete subs[key];
+                });
+                localStorage.setItem('threattracker_subs', JSON.stringify(subs));
+            } catch(e) {}
+        })();
+    </script>
 </body>
 </html>
