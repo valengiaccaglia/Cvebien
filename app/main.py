@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.crud import create_subscription, deactivate_subscription, get_subscription_by_token
+from sqlalchemy import select
+from app.models import Subscription
 from app.database import get_session, init_db
 from app.schemas import SubscriptionCreate
 from app.cve_client import fetch_cves_for_app, search_cpe
@@ -189,6 +191,39 @@ async def admin_run_worker(secret: str):
     import asyncio
     asyncio.create_task(process_new_cves())
     return {"ok": True, "message": "Worker triggered"}
+
+
+@app.get("/api/admin/test-alert")
+async def admin_test_alert(
+    secret: str,
+    app: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Fetch a real CVE for `app` from NVD and send it to all active subscribers."""
+    if secret != settings.ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cves = await fetch_cves_for_app(app, results=5)
+    if not cves:
+        raise HTTPException(status_code=404, detail=f"No CVEs found for '{app}'")
+    cve = cves[0]
+
+    result = await session.execute(
+        select(Subscription).where(Subscription.active == True)
+    )
+    subs = [s for s in result.scalars().all() if s.app_name.lower() == app.lower()]
+
+    sent = []
+    from app.email_service import send_cve_alert
+    for sub in subs:
+        await send_cve_alert(
+            sub.email,
+            {"unsubscribe_token": sub.unsubscribe_token, "app_name": sub.app_name},
+            cve,
+        )
+        sent.append(sub.email)
+
+    return {"ok": True, "cve": cve["cve_id"], "sent_to": sent}
 
 
 if __name__ == "__main__":
