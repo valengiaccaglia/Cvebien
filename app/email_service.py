@@ -30,7 +30,7 @@ async def send_cve_alert(to_email: str, subscription: dict, cve: dict) -> None:
     subject = f"CVE Alert: {cve['cve_id']} for {subscription['app_name']}"
     html = build_cve_email_html(subscription, cve)
     await resend.Emails.send_async({
-        "from": "alerts@cvenamenazas.app",
+        "from": "onboarding@resend.dev",
         "to": [to_email],
         "subject": subject,
         "html": html,
@@ -72,7 +72,7 @@ async def send_subscription_confirmation(to_email: str, app_name: str, severitie
     </div>
     """
     await resend.Emails.send_async({
-        "from": "alerts@cvenamenazas.app",
+        "from": "onboarding@resend.dev",
         "to": [to_email],
         "subject": f"Suscripción confirmada — {app_name}",
         "html": html,

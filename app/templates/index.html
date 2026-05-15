@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CVE Notifications — Vulnerabilidades que te podes encontrar</title>
+  <title>Threat Tracker — Vulnerabilidades que te podes encontrar</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -74,7 +74,7 @@ let S = {
   alertSevs: {critical:true, high:true, medium:false, low:false},
   alertDone: false,
   alertError: '',
-  subs: (() => { try { return JSON.parse(localStorage.getItem('cvebien_subs')||'{}'); } catch{return {};} })(),
+  subs: (() => { try { return JSON.parse(localStorage.getItem('threattracker_subs')||'{}'); } catch{return {};} })(),
   cves: {},        // { appId: CVE[] | null(loading) }
   phIdx: 0,
   cpeResults: [],  // live NVD CPE search results
@@ -143,7 +143,7 @@ const PH = ['Buscar CVE-2025-12891','openssl','linux kernel use-after-free','Pos
 setInterval(() => { S.phIdx = (S.phIdx+1) % PH.length; if (!document.querySelector('#search-input:focus') && !S.query) renderPlaceholder(); }, 2800);
 
 // ── Helpers ──────────────────────────────────────────────────────
-function saveSubs() { try { localStorage.setItem('cvebien_subs', JSON.stringify(S.subs)); } catch{} }
+function saveSubs() { try { localStorage.setItem('threattracker_subs', JSON.stringify(S.subs)); } catch{} }
 function dot(sev, size=6) { return `<span style="display:inline-block;width:${size}px;height:${size}px;border-radius:${size}px;background:${SEV[sev.toLowerCase()]||'#888'}"></span>`; }
 function sevColor(sev) { return SEV[(sev||'').toLowerCase()] || C.inkSoft; }
 function capitalize(s) { return s ? s.charAt(0).toUpperCase()+s.slice(1) : ''; }
@@ -203,7 +203,7 @@ function buildHeader() {
     <header style="padding:22px 56px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid ${C.lineSoft}">
       <button onclick="setTab('catalogo')" style="background:transparent;border:none;color:${C.ink};display:flex;align-items:center;gap:10px;padding:0">
         <div style="width:18px;height:18px;border-radius:9px;background:${C.white}"></div>
-        <span style="font-size:15px;font-weight:500;letter-spacing:-0.005em">cve bien</span>
+        <span style="font-size:15px;font-weight:500;letter-spacing:-0.005em">Threat Tracker</span>
       </button>
       <nav style="display:flex;gap:4px">
         ${tabBtn('Catálogo','catalogo')}
@@ -489,7 +489,7 @@ function buildFuentes() {
 function buildFooter() {
   return `
     <footer style="padding:24px 56px 32px;border-top:1px solid ${C.lineSoft};display:flex;justify-content:space-between;font-family:${FM};font-size:11px;color:${C.inkFaint};letter-spacing:0.04em">
-      <span>cve bien</span>
+      <span>Threat Tracker</span>
       <span>NVD + OSV</span>
     </footer>`;
 }
@@ -529,7 +529,7 @@ async function submitSubscribe() {
     setTimeout(()=>{S.alertApp=null;S.alertDone=false;render();}, 1200);
   } catch { S.alertError='Error al registrar. Intentá de nuevo.'; renderModal(); }
 }
-function saveSubs() { try{localStorage.setItem('cvebien_subs',JSON.stringify(S.subs));}catch{} }
+function saveSubs() { try{localStorage.setItem('threattracker_subs',JSON.stringify(S.subs));}catch{} }
 
 // ── Keyboard ─────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {

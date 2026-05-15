@@ -26,7 +26,7 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 app = FastAPI(
-    title="CVE Notifications",
+    title="Threat Tracker",
     description="CVE subscription and notification system",
     version="0.1.0",
     debug=settings.DEBUG,
@@ -179,7 +179,7 @@ async def api_subscribe(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "CVE Notifications"}
+    return {"status": "ok", "app": "Threat Tracker"}
 
 
 if __name__ == "__main__":
