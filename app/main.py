@@ -16,7 +16,7 @@ from app.database import get_session, init_db
 from app.schemas import SubscriptionCreate
 from app.cve_client import fetch_cves_for_app, search_cpe
 from app.email_service import send_subscription_confirmation
-from app.worker import start_scheduler
+from app.worker import start_scheduler, process_new_cves
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -180,6 +180,15 @@ async def api_subscribe(
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "Threat Tracker"}
+
+
+@app.post("/api/admin/run-worker")
+async def admin_run_worker(secret: str):
+    if secret != settings.ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    import asyncio
+    asyncio.create_task(process_new_cves())
+    return {"ok": True, "message": "Worker triggered"}
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = Field(default="", description="Supabase service key")
     DATABASE_URL: str = Field(default="", description="Postgres database URL")
     BASE_URL: str = Field(default="http://localhost:8000", description="Base URL for unsubscribe links")
+    ADMIN_SECRET: str = Field(default="changeme", description="Secret token to trigger admin endpoints")
 
     class Config:
         env_file = Path(__file__).resolve().parent.parent / ".env"
